@@ -40,7 +40,6 @@ def translate_polymorphic_filter_definitions_in_kwargs(
     """
     additional_args = []
     for field_path, val in kwargs.copy().items():  # Python 3 needs copy
-
         new_expr = _translate_polymorphic_filter_definition(
             queryset_model, field_path, val, using=using
         )
@@ -81,6 +80,29 @@ def translate_polymorphic_Q_object(queryset_model, potential_q_object, using=DEF
     return potential_q_object
 
 
+def _deepcopy_q_object(q):
+    """
+    Make a deepcopy of a Q-object.
+    """
+
+    def _copy_child(child):
+        if isinstance(child, tuple):
+            return child  # tuples are immutable, no need to make a copy.
+        elif isinstance(child, Q):
+            return _deepcopy_q_object(child)
+        else:
+            raise RuntimeError("Unknown child type: %s", type(child))
+
+    children = [_copy_child(c) for c in q.children]
+
+    if hasattr(q, "copy"):  # Django 4.2+
+        obj = q.copy()
+        obj.children = children
+    else:
+        obj = Q(*children, _connector=q.connector, _negated=q.negated)
+    return obj
+
+
 def translate_polymorphic_filter_definitions_in_args(queryset_model, args, using=DEFAULT_DB_ALIAS):
     """
     Translate the non-keyword argument list for PolymorphicQuerySet.filter()
@@ -93,7 +115,8 @@ def translate_polymorphic_filter_definitions_in_args(queryset_model, args, using
     Returns: modified Q objects
     """
     return [
-        translate_polymorphic_Q_object(queryset_model, copy.deepcopy(q), using=using) for q in args
+        translate_polymorphic_Q_object(queryset_model, _deepcopy_q_object(q), using=using)
+        for q in args
     ]
 
 
